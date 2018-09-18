@@ -264,6 +264,10 @@ func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
+			case "InvalidArgument":
+				if versionIdRequested != "INVALID-VERSION-ID" {
+					fmt.Println(aerr.Error())
+				}
 			default:
 				fmt.Println(aerr.Error())
 			}
@@ -272,14 +276,18 @@ func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string)
 			// Message from an error.
 			fmt.Println(err.Error())
 		}
-		return
+	} else {
+		versionIdResponse := strings.Trim(aws.StringValue(result.VersionId), "\"")
+
+		if versionIdResponse != versionIdRequested {
+			fmt.Println("deleteObjectWithVersion: versionIdResponse does not equal versionIdRequested")
+			return
+		}
+
 	}
 
-	versionIdResponse := strings.Trim(aws.StringValue(result.VersionId), "\"")
+}
 
-	if versionIdResponse != versionIdRequested {
-		fmt.Println("deleteObjectWithVersion: versionIdResponse does not equal versionIdRequested")
-		return
 	}
 }
 
@@ -522,6 +530,9 @@ func basicTests(svc *s3.S3, bucketName, objectName string) {
 	} else {
 		fmt.Println("   List objects:", "Success")
 	}
+
+	// Delete non-existing version
+	deleteObjectWithVersion(svc, bucketName, objectName, "INVALID-VERSION-ID")
 
 	// Delete previous to latest version (see latestVersion remains v5)
 	deleteObjectWithVersion(svc, bucketName, objectName, versionIdv4)
