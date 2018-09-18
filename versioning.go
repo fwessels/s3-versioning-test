@@ -123,6 +123,34 @@ func getObject(svc *s3.S3, bucket, key, versionId string) (etag string, deleteMa
 	return
 }
 
+func headObject(svc *s3.S3, bucket, key string) (success bool) {
+
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	_, err := svc.HeadObject(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			fmt.Println(aerr.Code())
+			switch aerr.Code() {
+			case "InternalError":
+				fmt.Println(aerr.Error())
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return false
+	}
+
+	return true
+}
+
 func copyObject(svc *s3.S3, bucket, src, versionIdSource, key string) (etag, versionId string) {
 
 	copySource := ""
@@ -288,7 +316,114 @@ func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string)
 
 }
 
+func getObjectUnversioned(svc *s3.S3, bucket, key, versionId string) (success bool) {
+
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		VersionId: aws.String(versionId),
 	}
+
+	_, err := svc.GetObject(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "InvalidArgument":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+
+	return
+}
+
+func headObjectUnversioned(svc *s3.S3, bucket, key, versionId string) (success bool) {
+
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		VersionId: aws.String(versionId),
+	}
+
+	_, err := svc.HeadObject(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "BadRequest":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+
+	return
+}
+
+
+func deleteObjectWithVersionUnversioned(svc *s3.S3, bucket, key, versionIdRequested string) (success bool) {
+
+	input := &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		VersionId: aws.String(versionIdRequested),
+	}
+
+	_, err := svc.DeleteObject(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "InvalidArgument":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+	return
+}
+
+func copyObjectUnversioned(svc *s3.S3, bucket, src, versionIdSource, key string) (success bool) {
+
+	copySource := fmt.Sprintf("/%s/%s?versionId=%s", bucket, src, versionIdSource)
+
+	input := &s3.CopyObjectInput{
+		Bucket:     aws.String(bucket),
+		CopySource: aws.String(copySource),
+		Key:        aws.String(key),
+	}
+
+	_, err := svc.CopyObject(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "InvalidArgument":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+
+	return
 }
 
 func main() {
@@ -305,6 +440,13 @@ func main() {
 	// Create S3 service client
 	svc := s3.New(sess)
 
+	basicTests(svc, bucketName, objectName, region)
+	unversionedTests(svc, bucketName, objectName, region)
+	//encryptionTests()
+}
+
+func basicTests(svc *s3.S3, bucketName, objectName, region string) {
+
 	if bucketName == "" {
 		// Create version enabled bucket
 		bucketName = fmt.Sprintf("versioned-%d", time.Now().Unix())
@@ -312,14 +454,7 @@ func main() {
 		putBucketVersioning(svc, bucketName, "Enabled")
 	} else {
 		objectName = fmt.Sprintf("object-%d", time.Now().Unix())
-		fmt.Println(objectName)
 	}
-
-	basicTests(svc, bucketName, objectName)
-	//encryptionTests()
-}
-
-func basicTests(svc *s3.S3, bucketName, objectName string) {
 
 	// Upload and verify first version
 	etagv1, versionIdv1 := putObject(svc, bucketName, objectName)
@@ -618,4 +753,100 @@ func basicTests(svc *s3.S3, bucketName, objectName string) {
 		fmt.Println("   List objects:", "Success")
 	}
 
+}
+
+func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create regular bucket
+		bucketName = fmt.Sprintf("unversioned-%d", time.Now().Unix())
+		createBucket(svc, bucketName, region)
+	} else {
+		bucketName = "un" + bucketName
+		objectName = fmt.Sprintf("object-%d", time.Now().Unix())
+	}
+
+	_, versionIdv1 := putObject(svc, bucketName, objectName)
+	if versionIdv1 != "" {
+		fmt.Println("   Unversioned put:", "*** NOT EXPECTING VERSION-ID")
+	} else {
+		fmt.Println("   Unversioned put:", "Success")
+	}
+
+	etagv2, versionIdv2 := putObject(svc, bucketName, objectName)
+	if versionIdv2 != "" {
+		fmt.Println("   Unversioned put:", "*** NOT EXPECTING VERSION-ID")
+	} else {
+		fmt.Println("   Unversioned put:", "Success")
+	}
+
+	// Implicitly get most recent version
+	if et, _ := getObject(svc, bucketName, objectName, ""); et != etagv2 {
+		fmt.Println("       Regular get:", "*** WRONG ETAG RETURNED")
+	} else {
+		fmt.Println("       Regular get:", "Success")
+	}
+
+	// Try to get a non-existing version
+	success := getObjectUnversioned(svc, bucketName, objectName, "PZbE8N3Tv3HBf1W8CAcCxJ9xgWc");
+	if !success {
+		fmt.Println("   Unversioned get:", "*** NOT GETTING EXPECTED ERROR")
+	} else {
+		fmt.Println("   Unversioned get:", "Success")
+	}
+
+	// Try to delete a non-existing version
+	success = deleteObjectWithVersionUnversioned(svc, bucketName, objectName, "Ft7Z9Toaf9bFsAaBCAR7eH9nu3Y")
+	if !success {
+		fmt.Println("Unversioned delete:", "*** NOT GETTING EXPECTED ERROR")
+	} else {
+		fmt.Println("Unversioned delete:", "Success")
+	}
+
+	// Try to copy a non-existing version
+	success = copyObjectUnversioned(svc, bucketName, objectName, "js4OvwPChitcUV8kKieFuuhg8fQ", objectName)
+	if !success {
+		fmt.Println("  Unversioned copy:", "*** NOT GETTING EXPECTED ERROR")
+	} else {
+		fmt.Println("  Unversioned copy:", "Success")
+	}
+
+	// Do a successful HEAD on the object
+	success = headObject(svc, bucketName, objectName);
+	if !success {
+		fmt.Println("      Regular head:", "*** NOT GETTING EXPECTED ERROR")
+	} else {
+		fmt.Println("      Regular head:", "Success")
+	}
+
+	// Try to do a HEAD on a non-existing version
+	success = headObjectUnversioned(svc, bucketName, objectName, "avZlNEXzv3h8lgKGre2d4M3O27w");
+	if !success {
+		fmt.Println("  Unversioned head:", "*** NOT GETTING EXPECTED ERROR")
+	} else {
+		fmt.Println("  Unversioned head:", "Success")
+	}
+}
+
+func encryptionTests() {
+
+	// Copy onto itself
+	//
+}
+
+func listingTests() {
+
+}
+
+func invalidIdTests() {
+	// test for invalid IDs
+	// getObject
+	// headObject
+	// copyObject
+}
+
+func headTests() {
+
+	// test HeadObject
+	// headObject
 }
