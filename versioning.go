@@ -397,7 +397,7 @@ func deleteObjectWithVersionUnversioned(svc *s3.S3, bucket, key, versionIdReques
 	return
 }
 
-func copyObjectUnversioned(svc *s3.S3, bucket, src, versionIdSource, key string) (success bool) {
+func copyObjectWithInvalidVersionId(svc *s3.S3, bucket, src, versionIdSource, key string) (success bool) {
 
 	copySource := fmt.Sprintf("/%s/%s?versionId=%s", bucket, src, versionIdSource)
 
@@ -442,6 +442,7 @@ func main() {
 
 	basicTests(svc, bucketName, objectName, region)
 	unversionedTests(svc, bucketName, objectName, region)
+	invalidVersionIdTests(svc, bucketName, objectName, region)
 	//encryptionTests()
 }
 
@@ -749,7 +750,6 @@ func basicTests(svc *s3.S3, bucketName, objectName, region string) {
 	} else {
 		fmt.Println("   List objects:", "Success")
 	}
-
 }
 
 func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
@@ -801,7 +801,7 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 	}
 
 	// Try to copy a non-existing version
-	success = copyObjectUnversioned(svc, bucketName, objectName, "js4OvwPChitcUV8kKieFuuhg8fQ", objectName)
+	success = copyObjectWithInvalidVersionId(svc, bucketName, objectName, "js4OvwPChitcUV8kKieFuuhg8fQ", objectName)
 	if !success {
 		fmt.Println("  Unversioned copy:", "*** EXPECTED ERROR MISSING")
 	} else {
@@ -857,6 +857,7 @@ func invalidVersionIdTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("Invalid delete:", "Success")
 	}
 
+	// Expecting invalid version for non-existing version
 	success = getObjectWithInvalidVersionId(svc, bucketName, objectName, "INVALID-VERSION-ID")
 	if !success {
 		fmt.Println("   Invalid get:", "*** EXPECTED ERROR MISSING")
@@ -864,6 +865,7 @@ func invalidVersionIdTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("   Invalid get:", "Success")
 	}
 
+	// Expecting bad request for non-existing version
 	success = headObjectWithInvalidVersionId(svc, bucketName, objectName, "INVALID-VERSION-ID")
 	if !success {
 		fmt.Println("  Invalid head:", "*** EXPECTED ERROR MISSING")
@@ -871,7 +873,12 @@ func invalidVersionIdTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("  Invalid head:", "Success")
 	}
 
-	// TODO: copyObject
+	success = copyObjectWithInvalidVersionId(svc, bucketName, objectName, "INVALID-VERSION-ID", objectName)
+	if !success {
+		fmt.Println("  Invalid copy:", "*** EXPECTED ERROR MISSING")
+	} else {
+		fmt.Println("  Invalid copy:", "Success")
+	}
 }
 
 func headTests() {
