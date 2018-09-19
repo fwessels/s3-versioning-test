@@ -81,7 +81,7 @@ func putObject(svc *s3.S3, bucket, key string) (etag, versionId string) {
 	}
 
 	etag = strings.Trim(aws.StringValue(result.ETag), "\"")
-	versionId = strings.Trim(aws.StringValue(result.VersionId), "\"")
+	versionId = aws.StringValue(result.VersionId)
 	return
 }
 
@@ -174,7 +174,7 @@ func copyObject(svc *s3.S3, bucket, src, versionIdSource, key string) (etag, ver
 	}
 
 	etag = strings.Trim(aws.StringValue(result.CopyObjectResult.ETag), "\"")
-	versionId = strings.Trim(aws.StringValue(result.VersionId), "\"")
+	versionId = aws.StringValue(result.VersionId)
 
 	return
 }
@@ -272,7 +272,7 @@ func deleteObject(svc *s3.S3, bucket, key string) (versionId string, deleteMarke
 		return
 	}
 
-	versionId = strings.Trim(aws.StringValue(result.VersionId), "\"")
+	versionId = aws.StringValue(result.VersionId)
 	if result.DeleteMarker != nil && *result.DeleteMarker {
 		deleteMarkerReturned = true
 	}
@@ -305,7 +305,7 @@ func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string)
 			fmt.Println(err.Error())
 		}
 	} else {
-		versionIdResponse := strings.Trim(aws.StringValue(result.VersionId), "\"")
+		versionIdResponse := aws.StringValue(result.VersionId)
 
 		if versionIdResponse != versionIdRequested {
 			fmt.Println("deleteObjectWithVersion: versionIdResponse does not equal versionIdRequested")
