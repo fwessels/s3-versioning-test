@@ -280,7 +280,7 @@ func deleteObject(svc *s3.S3, bucket, key string) (versionId string, deleteMarke
 	return
 }
 
-func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string) {
+func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string) bool {
 
 	input := &s3.DeleteObjectInput{
 		Bucket: aws.String(bucket),
@@ -295,6 +295,8 @@ func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string)
 			case "InvalidArgument":
 				if versionIdRequested != "INVALID-VERSION-ID" {
 					fmt.Println(aerr.Error())
+				} else {
+					return true
 				}
 			default:
 				fmt.Println(aerr.Error())
@@ -309,14 +311,13 @@ func deleteObjectWithVersion(svc *s3.S3, bucket, key, versionIdRequested string)
 
 		if versionIdResponse != versionIdRequested {
 			fmt.Println("deleteObjectWithVersion: versionIdResponse does not equal versionIdRequested")
-			return
+			return true
 		}
-
 	}
-
+	return false
 }
 
-func getObjectUnversioned(svc *s3.S3, bucket, key, versionId string) (success bool) {
+func getObjectWithInvalidVersionId(svc *s3.S3, bucket, key, versionId string) (success bool) {
 
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
@@ -343,7 +344,7 @@ func getObjectUnversioned(svc *s3.S3, bucket, key, versionId string) (success bo
 	return
 }
 
-func headObjectUnversioned(svc *s3.S3, bucket, key, versionId string) (success bool) {
+func headObjectWithInvalidVersionId(svc *s3.S3, bucket, key, versionId string) (success bool) {
 
 	input := &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
@@ -369,7 +370,6 @@ func headObjectUnversioned(svc *s3.S3, bucket, key, versionId string) (success b
 
 	return
 }
-
 
 func deleteObjectWithVersionUnversioned(svc *s3.S3, bucket, key, versionIdRequested string) (success bool) {
 
@@ -449,11 +449,11 @@ func basicTests(svc *s3.S3, bucketName, objectName, region string) {
 
 	if bucketName == "" {
 		// Create version enabled bucket
-		bucketName = fmt.Sprintf("versioned-%d", time.Now().Unix())
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
 		createBucket(svc, bucketName, region)
 		putBucketVersioning(svc, bucketName, "Enabled")
 	} else {
-		objectName = fmt.Sprintf("object-%d", time.Now().Unix())
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
 	}
 
 	// Upload and verify first version
@@ -666,9 +666,6 @@ func basicTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("   List objects:", "Success")
 	}
 
-	// Delete non-existing version
-	deleteObjectWithVersion(svc, bucketName, objectName, "INVALID-VERSION-ID")
-
 	// Delete previous to latest version (see latestVersion remains v5)
 	deleteObjectWithVersion(svc, bucketName, objectName, versionIdv4)
 	etagv4, versionIdv4 = "", ""
@@ -759,11 +756,11 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 
 	if bucketName == "" {
 		// Create regular bucket
-		bucketName = fmt.Sprintf("unversioned-%d", time.Now().Unix())
+		bucketName = fmt.Sprintf("unversioned-%d", time.Now().UnixNano())
 		createBucket(svc, bucketName, region)
 	} else {
 		bucketName = "un" + bucketName
-		objectName = fmt.Sprintf("object-%d", time.Now().Unix())
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
 	}
 
 	_, versionIdv1 := putObject(svc, bucketName, objectName)
@@ -788,9 +785,9 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 	}
 
 	// Try to get a non-existing version
-	success := getObjectUnversioned(svc, bucketName, objectName, "PZbE8N3Tv3HBf1W8CAcCxJ9xgWc");
+	success := getObjectWithInvalidVersionId(svc, bucketName, objectName, "PZbE8N3Tv3HBf1W8CAcCxJ9xgWc");
 	if !success {
-		fmt.Println("   Unversioned get:", "*** NOT GETTING EXPECTED ERROR")
+		fmt.Println("   Unversioned get:", "*** EXPECTED ERROR MISSING")
 	} else {
 		fmt.Println("   Unversioned get:", "Success")
 	}
@@ -798,7 +795,7 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 	// Try to delete a non-existing version
 	success = deleteObjectWithVersionUnversioned(svc, bucketName, objectName, "Ft7Z9Toaf9bFsAaBCAR7eH9nu3Y")
 	if !success {
-		fmt.Println("Unversioned delete:", "*** NOT GETTING EXPECTED ERROR")
+		fmt.Println("Unversioned delete:", "*** EXPECTED ERROR MISSING")
 	} else {
 		fmt.Println("Unversioned delete:", "Success")
 	}
@@ -806,7 +803,7 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 	// Try to copy a non-existing version
 	success = copyObjectUnversioned(svc, bucketName, objectName, "js4OvwPChitcUV8kKieFuuhg8fQ", objectName)
 	if !success {
-		fmt.Println("  Unversioned copy:", "*** NOT GETTING EXPECTED ERROR")
+		fmt.Println("  Unversioned copy:", "*** EXPECTED ERROR MISSING")
 	} else {
 		fmt.Println("  Unversioned copy:", "Success")
 	}
@@ -814,15 +811,15 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 	// Do a successful HEAD on the object
 	success = headObject(svc, bucketName, objectName);
 	if !success {
-		fmt.Println("      Regular head:", "*** NOT GETTING EXPECTED ERROR")
+		fmt.Println("      Regular head:", "*** EXPECTED ERROR MISSING")
 	} else {
 		fmt.Println("      Regular head:", "Success")
 	}
 
 	// Try to do a HEAD on a non-existing version
-	success = headObjectUnversioned(svc, bucketName, objectName, "avZlNEXzv3h8lgKGre2d4M3O27w");
+	success = headObjectWithInvalidVersionId(svc, bucketName, objectName, "avZlNEXzv3h8lgKGre2d4M3O27w");
 	if !success {
-		fmt.Println("  Unversioned head:", "*** NOT GETTING EXPECTED ERROR")
+		fmt.Println("  Unversioned head:", "*** EXPECTED ERROR MISSING")
 	} else {
 		fmt.Println("  Unversioned head:", "Success")
 	}
@@ -838,11 +835,43 @@ func listingTests() {
 
 }
 
-func invalidIdTests() {
-	// test for invalid IDs
-	// getObject
-	// headObject
-	// copyObject
+func invalidVersionIdTests(svc *s3.S3, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create version enabled bucket
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+		createBucket(svc, bucketName, region)
+		putBucketVersioning(svc, bucketName, "Enabled")
+	} else {
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
+	}
+
+	putObject(svc, bucketName, objectName)
+	putObject(svc, bucketName, objectName)
+
+	// Expecting invalid version for non-existing version
+	success := deleteObjectWithVersion(svc, bucketName, objectName, "INVALID-VERSION-ID")
+	if !success {
+		fmt.Println("Invalid delete:", "*** EXPECTED ERROR MISSING")
+	} else {
+		fmt.Println("Invalid delete:", "Success")
+	}
+
+	success = getObjectWithInvalidVersionId(svc, bucketName, objectName, "INVALID-VERSION-ID")
+	if !success {
+		fmt.Println("   Invalid get:", "*** EXPECTED ERROR MISSING")
+	} else {
+		fmt.Println("   Invalid get:", "Success")
+	}
+
+	success = headObjectWithInvalidVersionId(svc, bucketName, objectName, "INVALID-VERSION-ID")
+	if !success {
+		fmt.Println("  Invalid head:", "*** EXPECTED ERROR MISSING")
+	} else {
+		fmt.Println("  Invalid head:", "Success")
+	}
+
+	// TODO: copyObject
 }
 
 func headTests() {
