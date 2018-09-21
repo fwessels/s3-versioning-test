@@ -426,6 +426,85 @@ func copyObjectWithInvalidVersionId(svc *s3.S3, bucket, src, versionIdSource, ke
 	return
 }
 
+func listObjectVersionsVerified(svc *s3.S3, ignoreEmptyResponse bool, bucket, prefix string, versionIdsVerify, deleteMarkersIdsVerify [][]string, truncated []bool) (success bool) {
+
+	keyMarker, versionIdMarker := "", ""
+
+	if ignoreEmptyResponse {
+		// This is a fix for a minor deviation from AWS S3 behavior since Minio sometimes
+		// still sends an `IsTruncated = true` when there is actually no more content.
+		// So the next call is effectively a NOOP that return `IsTruncated = false` immediately.
+		// So the end result is the same but it takes one additional call for Minio.
+		//
+		// Extend response for one additional (empty) batch
+		versionIdsVerify = append(versionIdsVerify, []string{})
+		deleteMarkersIdsVerify = append(deleteMarkersIdsVerify, []string{})
+		truncated = append(truncated[:len(truncated)-1], []bool{true, false}...)
+	}
+
+	success = true
+	for i := 0; ; i++ {
+
+		input := &s3.ListObjectVersionsInput{
+			Bucket: aws.String(bucket),
+			Prefix: aws.String(prefix),
+			MaxKeys: aws.Int64(3),
+		}
+
+		if i > 0 {
+			input.KeyMarker = aws.String(keyMarker)
+			input.VersionIdMarker = aws.String(versionIdMarker)
+		}
+
+		result, err := svc.ListObjectVersions(input)
+		//fmt.Println(result)
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				switch aerr.Code() {
+				default:
+					fmt.Println(aerr.Error())
+				}
+			} else {
+				// Print the error, cast err to awserr.Error to get the Code and
+				// Message from an error.
+				fmt.Println(err.Error())
+			}
+			return
+		}
+
+		success = success && verifyListObjectsVersions(result, versionIdsVerify[i], deleteMarkersIdsVerify[i], truncated[i])
+
+		keyMarker = *result.NextKeyMarker
+		versionIdMarker = *result.NextVersionIdMarker
+
+		if !*result.IsTruncated {
+			break
+		}
+	}
+
+	return
+}
+
+func verifyListObjectsVersions(result *s3.ListObjectVersionsOutput, versionIdsVerify []string, deleteMarkersIdsVerify []string, truncated bool) (success bool) {
+	for i, ver := range result.Versions {
+		if *ver.VersionId != versionIdsVerify[i] {
+			fmt.Println("MISMATCH FOR ", i, "BETWEEN VERSIONS ", *ver.VersionId, "AND", versionIdsVerify[i], "(EXPECTED)")
+			return
+		}
+	}
+	for i, dm := range result.DeleteMarkers {
+		if *dm.VersionId != deleteMarkersIdsVerify[i] {
+			fmt.Println("MISMATCH FOR ", i, "BETWEEN DELETE MARKERS", *dm.VersionId, "AND", deleteMarkersIdsVerify[i], "(EXPECTED)")
+			return
+		}
+	}
+	if  *result.IsTruncated != truncated {
+		fmt.Println("MISMATCH BETWEEN ISTRUNCATED", *result.IsTruncated, "AND", truncated)
+		return
+	}
+	return true
+}
+
 func main() {
 
 	profile, region, endpoint, bucketName, objectName := "minio", "us-east-1", "http://localhost:9000", "", "object"
@@ -443,6 +522,7 @@ func main() {
 	basicTests(svc, bucketName, objectName, region)
 	unversionedTests(svc, bucketName, objectName, region)
 	invalidVersionIdTests(svc, bucketName, objectName, region)
+	paginatedListingTests(svc, profile, bucketName, objectName, region)
 	//encryptionTests()
 }
 
@@ -881,6 +961,139 @@ func invalidVersionIdTests(svc *s3.S3, bucketName, objectName, region string) {
 	}
 }
 
+func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create version enabled bucket
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+		createBucket(svc, bucketName, region)
+		putBucketVersioning(svc, bucketName, "Enabled")
+	} else {
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
+	}
+
+	{ // single version
+		objectName += "-1"
+		_, vid1 := putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid1}}, [][]string{{}}, []bool{false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // two versions
+		objectName += "-2"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		_, vid2 := putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid2, vid1}}, [][]string{{}}, []bool{false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // three versions
+		objectName += "-3"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		_, vid2 := putObject(svc, bucketName, objectName)
+		vid3, _ := deleteObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid2, vid1}}, [][]string{{vid3}}, []bool{false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // four versions
+		objectName += "-4"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		vid2, _ := deleteObject(svc, bucketName, objectName)
+		_, vid3 := putObject(svc, bucketName, objectName)
+		vid4, _ := deleteObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid3}, {vid1}}, [][]string{{vid4, vid2}, {}}, []bool{true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // five versions
+		objectName += "-5"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		vid2, _ := deleteObject(svc, bucketName, objectName)
+		_, vid3 := putObject(svc, bucketName, objectName)
+		_, vid4 := putObject(svc, bucketName, objectName)
+		_, vid5 := putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching etags and versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid5, vid4, vid3}, {vid1}}, [][]string{{}, {vid2}}, []bool{true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // six versions
+		objectName += "-6"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		vid2, _ := deleteObject(svc, bucketName, objectName)
+		_, vid3 := putObject(svc, bucketName, objectName)
+		vid4, _ := deleteObject(svc, bucketName, objectName)
+		_, vid5 := putObject(svc, bucketName, objectName)
+		_, vid6 := putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, true, bucketName, objectName, [][]string{{vid6, vid5}, {vid3, vid1}}, [][]string{{vid4}, {vid2}}, []bool{true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // seven versions
+		objectName += "-7"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		_, vid2 := putObject(svc, bucketName, objectName)
+		vid3, _ := deleteObject(svc, bucketName, objectName)
+		_, vid4 := putObject(svc, bucketName, objectName)
+		_, vid5 := putObject(svc, bucketName, objectName)
+		_, vid6 := putObject(svc, bucketName, objectName)
+		vid7, _ := deleteObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid6, vid5}, {vid4, vid2}, {vid1}}, [][]string{{vid7}, {vid3}, {}}, []bool{true, true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	// TODO: Test with prefix
+	// TODO: Test across multiple objects
+}
 func headTests() {
 
 	// test HeadObject
