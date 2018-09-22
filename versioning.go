@@ -1093,6 +1093,47 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 
 	// TODO: Test with prefix
 	// TODO: Test across multiple objects
+	{ // eight versions
+		objectName += "-8"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		_, vid2 := putObject(svc, bucketName, objectName)
+		vid3, _ := deleteObject(svc, bucketName, objectName)
+		_, vid4 := putObject(svc, bucketName, objectName)
+		_, vid5 := putObject(svc, bucketName, objectName)
+		_, vid6 := putObject(svc, bucketName, objectName)
+		vid7, _ := deleteObject(svc, bucketName, objectName)
+		_, vid8 := putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid8, vid6}, {vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {vid3}, {}}, []bool{true, true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // eight versions
+		objectName += "-8"
+		_, vid1 := putObject(svc, bucketName, objectName)
+		_, vid2 := putObject(svc, bucketName, objectName)
+		vid3, _ := deleteObject(svc, bucketName, objectName)
+		_, vid4 := putObject(svc, bucketName, objectName)
+		_, vid5 := putObject(svc, bucketName, objectName)
+		_, vid6 := putObject(svc, bucketName, objectName)
+		vid7, _ := deleteObject(svc, bucketName, objectName)
+		_, vid8 := putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid8, vid6}, {vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {vid3}, {}}, []bool{true, true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
 }
 func headTests() {
 
