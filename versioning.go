@@ -1114,8 +1114,8 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 		objectName = objectName[:len(objectName)-2]
 	}
 
-	{ // eight versions
-		objectName += "-8"
+	{ // nine versions
+		objectName += "-9"
 		_, vid1 := putObject(svc, bucketName, objectName)
 		_, vid2 := putObject(svc, bucketName, objectName)
 		vid3, _ := deleteObject(svc, bucketName, objectName)
@@ -1124,9 +1124,10 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 		_, vid6 := putObject(svc, bucketName, objectName)
 		vid7, _ := deleteObject(svc, bucketName, objectName)
 		_, vid8 := putObject(svc, bucketName, objectName)
+		_, vid9 := putObject(svc, bucketName, objectName)
 
 		// List object versions and check for matching versionids
-		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid8, vid6}, {vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {vid3}, {}}, []bool{true, true, false})
+		success := listObjectVersionsVerified(svc, true, bucketName, objectName, [][]string{{vid9, vid8}, {vid6, vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {}, {vid3}}, []bool{true, true, false})
 		if !success {
 			fmt.Println("Paginated list:", "*** MISMATCH")
 		} else {
