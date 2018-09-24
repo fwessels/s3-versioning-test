@@ -474,8 +474,12 @@ func listObjectVersionsVerified(svc *s3.S3, ignoreEmptyResponse bool, bucket, pr
 
 		success = success && verifyListObjectsVersions(result, versionIdsVerify[i], deleteMarkersIdsVerify[i], truncated[i])
 
-		keyMarker = *result.NextKeyMarker
-		versionIdMarker = *result.NextVersionIdMarker
+		if result.NextKeyMarker != nil {
+			keyMarker = *result.NextKeyMarker
+		}
+		if result.NextVersionIdMarker != nil {
+			versionIdMarker = *result.NextVersionIdMarker
+		}
 
 		if !*result.IsTruncated {
 			break
@@ -1062,7 +1066,7 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 		_, vid6 := putObject(svc, bucketName, objectName)
 
 		// List object versions and check for matching versionids
-		success := listObjectVersionsVerified(svc, true, bucketName, objectName, [][]string{{vid6, vid5}, {vid3, vid1}}, [][]string{{vid4}, {vid2}}, []bool{true, false})
+		success := listObjectVersionsVerified(svc, true && profile == "minio", bucketName, objectName, [][]string{{vid6, vid5}, {vid3, vid1}}, [][]string{{vid4}, {vid2}}, []bool{true, false})
 		if !success {
 			fmt.Println("Paginated list:", "*** MISMATCH")
 		} else {
@@ -1127,7 +1131,7 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 		_, vid9 := putObject(svc, bucketName, objectName)
 
 		// List object versions and check for matching versionids
-		success := listObjectVersionsVerified(svc, true, bucketName, objectName, [][]string{{vid9, vid8}, {vid6, vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {}, {vid3}}, []bool{true, true, false})
+		success := listObjectVersionsVerified(svc, true && profile == "minio", bucketName, objectName, [][]string{{vid9, vid8}, {vid6, vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {}, {vid3}}, []bool{true, true, false})
 		if !success {
 			fmt.Println("Paginated list:", "*** MISMATCH")
 		} else {
