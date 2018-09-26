@@ -509,6 +509,61 @@ func verifyListObjectsVersions(result *s3.ListObjectVersionsOutput, versionIdsVe
 	return true
 }
 
+func listObjectWithInvalidVersionId(svc *s3.S3, bucket, prefix string) (success bool) {
+
+	input := &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+		MaxKeys: aws.Int64(3),
+	}
+
+	result, err := svc.ListObjectVersions(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return
+	}
+
+	keyMarker := ""
+	if result.NextKeyMarker != nil {
+		keyMarker = *result.NextKeyMarker
+	}
+
+	input2nd := &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+		MaxKeys: aws.Int64(3),
+		KeyMarker: aws.String(keyMarker),
+		VersionIdMarker: aws.String("INVALID-VERSION-ID"),
+	}
+
+	_, err = svc.ListObjectVersions(input2nd)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "InvalidArgument":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+
+	return
+}
+
 func main() {
 
 	profile, region, endpoint, bucketName, objectName := "minio", "us-east-1", "http://localhost:9000", "", "object"
@@ -1132,6 +1187,26 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 
 		// List object versions and check for matching versionids
 		success := listObjectVersionsVerified(svc, true && profile == "minio", bucketName, objectName, [][]string{{vid9, vid8}, {vid6, vid5, vid4}, {vid2, vid1}}, [][]string{{vid7}, {}, {vid3}}, []bool{true, true, false})
+		if !success {
+			fmt.Println("Paginated list:", "*** MISMATCH")
+		} else {
+			fmt.Println("Paginated list:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ //
+		objectName += "-a"
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectWithInvalidVersionId(svc, bucketName, objectName)
 		if !success {
 			fmt.Println("Paginated list:", "*** MISMATCH")
 		} else {
