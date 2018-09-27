@@ -657,6 +657,106 @@ func listObjectVersionsAndDelete(svc *s3.S3, bucket, prefix string) (deleted int
 	return
 }
 
+func multiPartInitiate(svc *s3.S3, bucket, key string) (uploadId string) {
+
+	input := &s3.CreateMultipartUploadInput{
+		Bucket: 	aws.String(bucket),
+		Key:        aws.String(key),
+	}
+
+	result, err := svc.CreateMultipartUpload(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return
+	}
+
+	uploadId = *result.UploadId
+	return
+}
+
+func multiPartUpload(svc *s3.S3, bucket, key, uploadId string) (etag string) {
+
+	input := &s3.UploadPartInput{
+		Body:       aws.ReadSeekCloser(strings.NewReader("versioning.go")),
+		Bucket: 	aws.String(bucket),
+		Key:        aws.String(key),
+		PartNumber: aws.Int64(1),
+		UploadId:   aws.String(uploadId),
+	}
+
+	result, err := svc.UploadPart(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return
+	}
+
+	etag = *result.ETag
+	return
+}
+
+func multiPartComplete(svc *s3.S3, bucket, key, uploadId, etagPart1 string) (etag, versionId string) {
+	input := &s3.CompleteMultipartUploadInput{
+		Bucket: 	aws.String(bucket),
+		Key:        aws.String(key),
+		MultipartUpload: &s3.CompletedMultipartUpload{
+			Parts: []*s3.CompletedPart{
+				{
+					ETag:       aws.String(etagPart1),
+					PartNumber: aws.Int64(1),
+				},
+				//{
+				//	ETag:       aws.String("\"d8c2eafd90c266e19ab9dcacc479f8af\""),
+				//	PartNumber: aws.Int64(2),
+				//},
+			},
+		},
+		UploadId:   aws.String(uploadId),
+	}
+
+	result, err := svc.CompleteMultipartUpload(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return
+	}
+
+	etag = *result.ETag
+	versionId = *result.VersionId
+	return
+}
+
+func putObjectMultipart(svc *s3.S3, bucketName string, objectName string) (etag, versionId string) {
+	uploadId := multiPartInitiate(svc, bucketName, objectName)
+	etagPart1 := multiPartUpload(svc, bucketName, objectName, uploadId)
+	return multiPartComplete(svc, bucketName, objectName, uploadId, etagPart1)
+}
+
 func main() {
 
 	profile, region, endpoint, bucketName, objectName := "minio", "us-east-1", "http://localhost:9000", "", "object"
@@ -1376,4 +1476,44 @@ func headTests() {
 
 	// test HeadObject
 	// headObject
+}
+func multipartUploadTests(svc *s3.S3, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create version enabled bucket
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+		createBucket(svc, bucketName, region)
+		putBucketVersioning(svc, bucketName, "Enabled")
+	} else {
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
+	}
+
+	{ // single version
+		objectName += "-1"
+		_, vid1 := putObjectMultipart(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid1}}, [][]string{{}}, []bool{false})
+		if !success {
+			fmt.Println("  Multipart put:", "*** MISMATCH")
+		} else {
+			fmt.Println("  Multipart put:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	{ // two versions
+		objectName += "-2"
+		_, vid1 := putObjectMultipart(svc, bucketName, objectName)
+		_, vid2 := putObjectMultipart(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid2, vid1}}, [][]string{{}}, []bool{false})
+		if !success {
+			fmt.Println("  Multipart put:", "*** MISMATCH")
+		} else {
+			fmt.Println("  Multipart put:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
 }
