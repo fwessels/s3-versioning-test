@@ -757,6 +757,37 @@ func putObjectMultipart(svc *s3.S3, bucketName string, objectName string) (etag,
 	return multiPartComplete(svc, bucketName, objectName, uploadId, etagPart1)
 }
 
+func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdentifier) (objs []*s3.DeletedObject) {
+
+	if len(objident) == 0 {
+		return
+	}
+
+	delete := &s3.DeleteObjectsInput{
+		Bucket: aws.String(bucket),
+		Delete: &s3.Delete{
+			Objects: objident,
+			Quiet: aws.Bool(false),
+		},
+	}
+
+	resultDeleted, err := svc.DeleteObjects(delete)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return
+	}
+	return resultDeleted.Deleted
+}
+
 func main() {
 
 	profile, region, endpoint, bucketName, objectName := "minio", "us-east-1", "http://localhost:9000", "", "object"
@@ -776,6 +807,7 @@ func main() {
 	invalidVersionIdTests(svc, bucketName, objectName, region)
 	paginatedListingTests(svc, profile, bucketName, objectName, region)
 	//encryptionTests()
+	deleteMultipleObjectTests(svc, bucketName, objectName, region)
 }
 
 func basicTests(svc *s3.S3, bucketName, objectName, region string) {
@@ -1472,6 +1504,88 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 		fmt.Println("List and delete:", "Success")
 	}
 }
+
+func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create version enabled bucket
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+		createBucket(svc, bucketName, region)
+		putBucketVersioning(svc, bucketName, "Enabled")
+	} else {
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
+	}
+
+	{ // delete a versioned object (add a delete marker)
+		objectName += "-1"
+		putObject(svc, bucketName, objectName)
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	vidPut := ""
+	{ // delete a versioned object
+		objectName += "-2"
+		putObject(svc, bucketName, objectName)
+		_, vidPut = putObject(svc, bucketName, objectName)
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	vidDelete := ""
+	{ // delete a delete marker
+		objectName += "-3"
+		putObject(svc, bucketName, objectName)
+		putObject(svc, bucketName, objectName)
+		vidDelete, _ = deleteObject(svc, bucketName, objectName)
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	objident := []*s3.ObjectIdentifier{}
+
+	objident = append(objident, &s3.ObjectIdentifier{
+		Key:       aws.String(objectName + "-1"),
+	})
+	objident = append(objident, &s3.ObjectIdentifier{
+		Key:       aws.String(objectName + "-2"),
+		VersionId: aws.String(vidPut),
+	})
+	objident = append(objident, &s3.ObjectIdentifier{
+		Key:       aws.String(objectName + "-3"),
+		VersionId: aws.String(vidDelete),
+	})
+
+	deleted := deleteMultipleObjects(svc, bucketName, objident)
+	if len(deleted) != 3 {
+		fmt.Println("Multiple Delete:", "*** MISMATCH")
+		return
+	} else {
+		for _, d := range deleted {
+			switch *d.Key {
+			case objectName + "-1":
+				// Regular delete, for versioned objects this just adds a delete marker
+				if !(*d.DeleteMarker && *d.DeleteMarkerVersionId != "" &&
+				     d.VersionId == nil) {
+					fmt.Println("Add a delete marker:", "*** MISMATCH")
+				}
+			case objectName + "-2":
+				// Delete a version of an object (not a delete marker), just return requested version id
+				if !(d.DeleteMarker == nil && d.DeleteMarkerVersionId == nil &&
+					*d.VersionId != "") {
+					fmt.Println("Delete a versioned object:", "*** MISMATCH")
+				}
+			case objectName + "-3":
+				// Delete a delete marker, returned DeleteMarkerVersionId equals requested version id
+				if !(*d.DeleteMarker && *d.DeleteMarkerVersionId == *d.VersionId) {
+					fmt.Println("Delete a delete marker:", "*** MISMATCH")
+				}
+			default:
+				fmt.Println("Multiple Delete:", "*** MISMATCH")
+				return
+			}
+		}
+	}
+	fmt.Println("Multiple Delete:", "Success")
+}
+
 func headTests() {
 
 	// test HeadObject
