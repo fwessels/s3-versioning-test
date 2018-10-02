@@ -1517,14 +1517,14 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
 	}
 
-	{ // delete a versioned object (add a delete marker)
+	{ // create single versioned object
 		objectName += "-1"
 		putObject(svc, bucketName, objectName)
 		objectName = objectName[:len(objectName)-2]
 	}
 
 	vidPut := ""
-	{ // delete a versioned object
+	{  // create object with two versions
 		objectName += "-2"
 		putObject(svc, bucketName, objectName)
 		_, vidPut = putObject(svc, bucketName, objectName)
@@ -1532,7 +1532,7 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 	}
 
 	vidDelete := ""
-	{ // delete a delete marker
+	{ // create object with two versions plus a delete marker
 		objectName += "-3"
 		putObject(svc, bucketName, objectName)
 		putObject(svc, bucketName, objectName)
@@ -1543,25 +1543,34 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 	objident := []*s3.ObjectIdentifier{}
 
 	objident = append(objident, &s3.ObjectIdentifier{
+		// delete an object in a versioned bucket (add a delete marker)
 		Key:       aws.String(objectName + "-1"),
 	})
 	objident = append(objident, &s3.ObjectIdentifier{
+		// delete a version of an object
 		Key:       aws.String(objectName + "-2"),
 		VersionId: aws.String(vidPut),
 	})
 	objident = append(objident, &s3.ObjectIdentifier{
+		// delete a delete marker
 		Key:       aws.String(objectName + "-3"),
 		VersionId: aws.String(vidDelete),
 	})
+	objident = append(objident, &s3.ObjectIdentifier{
+		// delete a non-existing object (succeeds as per S3 spec by creating
+		// an object with just a delete marker)
+		Key:       aws.String(objectName + "-NON-EXISTING-TO-BE-CREATED"),
+	})
 
 	deleted := deleteMultipleObjects(svc, bucketName, objident)
-	if len(deleted) != 3 {
+	if len(deleted) != 4 {
 		fmt.Println("Multiple Delete:", "*** MISMATCH")
 		return
 	} else {
 		for _, d := range deleted {
 			switch *d.Key {
 			case objectName + "-1":
+			case objectName + "-NON-EXISTING-TO-BE-CREATED":
 				// Regular delete, for versioned objects this just adds a delete marker
 				if !(*d.DeleteMarker && *d.DeleteMarkerVersionId != "" &&
 				     d.VersionId == nil) {
