@@ -808,6 +808,7 @@ func main() {
 	paginatedListingTests(svc, profile, bucketName, objectName, region)
 	//encryptionTests()
 	deleteMultipleObjectTests(svc, bucketName, objectName, region)
+	multipartUploadTests(svc, bucketName, objectName, region)
 }
 
 func basicTests(svc *s3.S3, bucketName, objectName, region string) {
