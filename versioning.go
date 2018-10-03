@@ -757,7 +757,7 @@ func putObjectMultipart(svc *s3.S3, bucketName string, objectName string) (etag,
 	return multiPartComplete(svc, bucketName, objectName, uploadId, etagPart1)
 }
 
-func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdentifier) (objs []*s3.DeletedObject) {
+func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdentifier) (objs []*s3.DeletedObject, errs []*s3.Error) {
 
 	if len(objident) == 0 {
 		return
@@ -785,7 +785,7 @@ func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdent
 		}
 		return
 	}
-	return resultDeleted.Deleted
+	return resultDeleted.Deleted, resultDeleted.Errors
 }
 
 func main() {
@@ -1552,6 +1552,11 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 		VersionId: aws.String(vidPut),
 	})
 	objident = append(objident, &s3.ObjectIdentifier{
+		// try to delete a non-existing version of an object (will fail)
+		Key:       aws.String(objectName + "-2"),
+		VersionId: aws.String("INVALID-VERSION-ID"),
+	})
+	objident = append(objident, &s3.ObjectIdentifier{
 		// delete a delete marker
 		Key:       aws.String(objectName + "-3"),
 		VersionId: aws.String(vidDelete),
@@ -1562,7 +1567,7 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 		Key:       aws.String(objectName + "-NON-EXISTING-TO-BE-CREATED"),
 	})
 
-	deleted := deleteMultipleObjects(svc, bucketName, objident)
+	deleted, errors := deleteMultipleObjects(svc, bucketName, objident)
 	if len(deleted) != 4 {
 		fmt.Println("Multiple Delete:", "*** MISMATCH")
 		return
@@ -1586,6 +1591,21 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 				// Delete a delete marker, returned DeleteMarkerVersionId equals requested version id
 				if !(*d.DeleteMarker && *d.DeleteMarkerVersionId == *d.VersionId) {
 					fmt.Println("Delete a delete marker:", "*** MISMATCH")
+				}
+			default:
+				fmt.Println("Multiple Delete:", "*** MISMATCH")
+				return
+			}
+		}
+	}
+	if len(errors) != 1 {
+		fmt.Println("Multiple Delete:", "*** MISMATCH")
+	} else {
+		for _, e := range errors {
+			switch *e.Code {
+			case "NoSuchVersion":
+				if *e.Message != "The specified version does not exist." {
+					fmt.Println("Delete a non-existing object:", "*** MISMATCH")
 				}
 			default:
 				fmt.Println("Multiple Delete:", "*** MISMATCH")
