@@ -798,9 +798,37 @@ func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdent
 	return resultDeleted.Deleted, resultDeleted.Errors
 }
 
+func putObjectEncrypted(svc *s3.S3, bucket, key string) (etag, versionId string) {
+/*
+	result, err := svc.PutObject((&s3.PutObjectInput{}).
+		SetBucket(bucket).
+		SetKey(key).
+		SetSSECustomerAlgorithm("AES256").
+		SetSSECustomerKey("at1TMx82nEy7SoAK8jHYanMQDVZMSLayXaaUvTc6CP0=").
+		SetSSECustomerKeyMD5("LWkBoT3psNdTYez70TVHUQ==").
+		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 1024))),
+	)
+
+	fmt.Println(result, err)
+
+	//  --sse-customer-algorithm=AES256
+	//  --sse-customer-key=at1TMx82nEy7SoAK8jHYanMQDVZMSLayXaaUvTc6CP0=
+	//  --sse-customer-key-md5="LWkBoT3psNdTYez70TVHUQ=="
+
+	if err != nil {
+		dumpAwsError(err)
+		return
+	}
+
+	etag = strings.Trim(aws.StringValue(result.ETag), "\"")
+	versionId = aws.StringValue(result.VersionId)
+*/
+	return
+}
+
 func main() {
 
-	profile, region, endpoint, bucketName, objectName := "minio", "us-east-1", "http://localhost:9000", "", "object"
+	profile, region, endpoint, bucketName, objectName := "minio", "us-east-1", "http://localhost:9000", "", "path/object"
 //	profile, region, endpoint, bucketName, objectName := "prive", "us-west-1", "https://s3-us-west-1.amazonaws.com", "versioned12345678", ""
 
 	// Specify profile for config and region for requests
@@ -816,9 +844,10 @@ func main() {
 	unversionedTests(svc, bucketName, objectName, region)
 	invalidVersionIdTests(svc, bucketName, objectName, region)
 	paginatedListingTests(svc, profile, bucketName, objectName, region)
-	//encryptionTests()
 	deleteMultipleObjectTests(svc, bucketName, objectName, region)
 	multipartUploadTests(svc, bucketName, objectName, region)
+	//encryptionTests(svc, bucketName, objectName, region)
+	//headTests()
 	if profile == "minio" {
 		bucketTests(svc, bucketName, objectName, region)
 	}
@@ -1201,15 +1230,6 @@ func unversionedTests(svc *s3.S3, bucketName, objectName, region string) {
 	} else {
 		fmt.Println("  Unversioned head:", "Success")
 	}
-}
-
-func encryptionTests() {
-
-	// Copy onto itself
-	//
-}
-
-func listingTests() {
 
 }
 
@@ -1634,6 +1654,7 @@ func headTests() {
 	// test HeadObject
 	// headObject
 }
+
 func multipartUploadTests(svc *s3.S3, bucketName, objectName, region string) {
 
 	if bucketName == "" {
@@ -1673,6 +1694,53 @@ func multipartUploadTests(svc *s3.S3, bucketName, objectName, region string) {
 		}
 		objectName = objectName[:len(objectName)-2]
 	}
+}
+
+func encryptionTests(svc *s3.S3, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create version enabled bucket
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+		createBucket(svc, bucketName, region)
+		putBucketVersioning(svc, bucketName, "Enabled")
+	} else {
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
+	}
+
+	{ // single version
+		objectName += "-1"
+		_, vid1 := putObjectEncrypted(svc, bucketName, objectName)
+
+		// List object versions and check for matching versionids
+		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid1}}, [][]string{{}}, []bool{false})
+		if !success {
+			fmt.Println("  Encrypted:", "*** MISMATCH")
+		} else {
+			fmt.Println("  Encrypted:", "Success")
+		}
+		objectName = objectName[:len(objectName)-2]
+	}
+
+	//aws s3api copy-object --copy-source vadmeste/testfile --bucket vadmeste --key testfile
+	//  --copy-source-sse-customer-algorithm=AES256
+	//  --copy-source-sse-customer-key=MzJieXRlc2xvbmdzZWNyZXRrZXltdXN0cHJvdmlkZWQ=
+	//  --copy-source-sse-customer-key-md5=7PpPLAK26ONlVUGOWlusfg==
+	//  --sse-customer-algorithm=AES256
+	//  --sse-customer-key=at1TMx82nEy7SoAK8jHYanMQDVZMSLayXaaUvTc6CP0=
+	//  --sse-customer-key-md5="LWkBoT3psNdTYez70TVHUQ=="
+	//{
+	//	"CopyObjectResult": {
+	//	"ETag": "\"03c88e721a47e499dc6bb489daf290c8\"",
+	//		"LastModified": "2018-09-12T10:39:27.000Z"
+	//},
+	//	"SSECustomerKeyMD5": "LWkBoT3psNdTYez70TVHUQ==",
+	//	"SSECustomerAlgorithm": "AES256",
+	//	"CopySourceVersionId": "BEXop4A53jLGIDYRPsVH.xXlMe8w6eVr",
+	//	"VersionId": "DU1kqfvhsC.4aZ11QA9s2i2Gn9wdwrh7"
+	//}
+
+	// Copy onto itself
+	//
 }
 
 func bucketTests(svc *s3.S3, bucketName, objectName, region string) {
