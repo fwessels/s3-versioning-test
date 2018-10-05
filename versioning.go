@@ -49,7 +49,7 @@ func createBucket(svc *s3.S3, bucket, location string) {
 	//fmt.Println(result)
 }
 
-func putBucketVersioning(svc *s3.S3, bucket, status string) {
+func putBucketVersioning(svc *s3.S3, bucket, status string) (bucketMustBeEmptyError bool, err error) {
 
 	input := &s3.PutBucketVersioningInput{
 		Bucket: aws.String(bucket),
@@ -58,13 +58,23 @@ func putBucketVersioning(svc *s3.S3, bucket, status string) {
 		},
 	}
 
-	_, err := svc.PutBucketVersioning(input)
+	_, err = svc.PutBucketVersioning(input)
 	if err != nil {
-		dumpAwsError(err)
-		return
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "BucketMustBeEmpty":
+				return true, nil
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return false, err
 	}
-
-	//fmt.Println(result)
+	return
 }
 
 func putObject(svc *s3.S3, bucket, key string) (etag, versionId string) {
@@ -809,6 +819,9 @@ func main() {
 	//encryptionTests()
 	deleteMultipleObjectTests(svc, bucketName, objectName, region)
 	multipartUploadTests(svc, bucketName, objectName, region)
+	if profile == "minio" {
+		bucketTests(svc, bucketName, objectName, region)
+	}
 }
 
 func basicTests(svc *s3.S3, bucketName, objectName, region string) {
@@ -1660,4 +1673,28 @@ func multipartUploadTests(svc *s3.S3, bucketName, objectName, region string) {
 		}
 		objectName = objectName[:len(objectName)-2]
 	}
+}
+
+func bucketTests(svc *s3.S3, bucketName, objectName, region string) {
+
+	// Create new bucket and enable versioning
+	bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+	createBucket(svc, bucketName, region)
+	if _, err := putBucketVersioning(svc, bucketName, "Enabled"); err == nil {
+		fmt.Println("  Bucket tests:", "Success")
+	} else {
+		fmt.Println("  Bucket tests:", "*** MISMATCH")
+	}
+
+	// Create new bucket, add some content, and try to enable versioning (will fail)
+	bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+	createBucket(svc, bucketName, region)
+	putObject(svc, bucketName, objectName)
+	if bucketMustBeEmtpyError, _ := putBucketVersioning(svc, bucketName, "Enabled"); bucketMustBeEmtpyError {
+		fmt.Println("  Bucket tests:", "Success")
+	} else {
+		fmt.Println("  Bucket tests:", "*** MISMATCH")
+	}
+
+
 }
