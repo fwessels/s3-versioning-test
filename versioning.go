@@ -49,6 +49,29 @@ func createBucket(svc *s3.S3, bucket, location string) {
 	//fmt.Println(result)
 }
 
+func deleteBucket(svc *s3.S3, bucket string) error {
+
+	input := &s3.DeleteBucketInput{
+		Bucket: aws.String(bucket),
+	}
+
+	_, err := svc.DeleteBucket(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
 func putBucketVersioning(svc *s3.S3, bucket, status string) (bucketMustBeEmptyError bool, err error) {
 
 	input := &s3.PutBucketVersioningInput{
@@ -75,6 +98,30 @@ func putBucketVersioning(svc *s3.S3, bucket, status string) (bucketMustBeEmptyEr
 		return false, err
 	}
 	return
+}
+
+func getBucketVersioning(svc *s3.S3, bucket string) (bool, error) {
+
+	input := &s3.GetBucketVersioningInput{
+		Bucket: aws.String(bucket),
+	}
+
+	result, err := svc.GetBucketVersioning(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+		return false, err
+	}
+
+	return result.Status != nil && *result.Status == "Enabled", nil
 }
 
 func putObject(svc *s3.S3, bucket, key string) (etag, versionId string) {
@@ -1764,5 +1811,21 @@ func bucketTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("  Bucket tests:", "*** MISMATCH")
 	}
 
-
+	// a) Create new bucket, b) enable versioning, c) delete bucket
+	// d) recreate bucket, e) check versioning (should be off)
+	bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+	createBucket(svc, bucketName, region)
+	putBucketVersioning(svc, bucketName, "Enabled")
+	if enabled, err := getBucketVersioning(svc, bucketName); err != nil || !enabled {
+		fmt.Println("  Bucket tests:", "*** EXPECTED TO FIND ENABLED")
+	}
+	if err := deleteBucket(svc, bucketName); err != nil {
+		fmt.Println("  Bucket tests:", "*** MISMATCH")
+	}
+	createBucket(svc, bucketName, region)
+	if enabled, err := getBucketVersioning(svc, bucketName); err != nil || enabled {
+		fmt.Println("  Bucket tests:", "*** SHOULD NOT BE ENABLED")
+	} else {
+		fmt.Println("  Bucket tests:", "Success")
+	}
 }
