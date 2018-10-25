@@ -933,11 +933,13 @@ func main() {
 	paginatedListingTests(svc, profile, bucketName, objectName, region)
 	deleteMultipleObjectTests(svc, bucketName, objectName, region)
 	multipartUploadTests(svc, bucketName, objectName, region)
-	//encryptionTests(svc, bucketName, objectName, region)
-	//headTests()
+	headTests()
 	if profile == "minio" {
 		bucketTests(svc, bucketName, objectName, region)
 	}
+	encryptionTests(svc, bucketName, objectName, region)
+
+	// Test on distributed minio
 }
 
 func basicTests(svc *s3.S3, bucketName, objectName, region string) {
@@ -1785,6 +1787,14 @@ func multipartUploadTests(svc *s3.S3, bucketName, objectName, region string) {
 
 func encryptionTests(svc *s3.S3, bucketName, objectName, region string) {
 
+	// Specify your own credentials here
+	accessKey := ""
+	secretKey := ""
+	if accessKey == "" || secretKey == "" {
+		fmt.Println("  Encrypted:", "*** SKIPPING (credentials not set)")
+		return
+	}
+
 	if bucketName == "" {
 		// Create version enabled bucket
 		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
@@ -1794,40 +1804,29 @@ func encryptionTests(svc *s3.S3, bucketName, objectName, region string) {
 		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
 	}
 
+	s3Client, err := minio.New("localhost:9000", accessKey, secretKey, false)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 	{ // single version
 		objectName += "-1"
-		_, vid1 := putObjectEncrypted(svc, bucketName, objectName)
+		putObjectEncrypted(s3Client, bucketName, objectName, "geheim")
+		putObjectEncrypted(s3Client, bucketName, objectName, "geheimer")
 
-		// List object versions and check for matching versionids
-		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid1}}, [][]string{{}}, []bool{false})
-		if !success {
+		if _, _, accessDenied := copyObjectInPlaceEncrypted(s3Client, bucketName, objectName, "INCORRECT", "geheimst"); !accessDenied {
+			fmt.Println("  Encrypted:", "*** MISMATCH")
+		}
+		_, _, _ = copyObjectInPlaceEncrypted(s3Client, bucketName, objectName, "geheimer", "geheimst")
+
+		etags, versionIds, _, _ := listObjectVersions(svc, bucketName, objectName)
+		if len(etags) != 3 || len(versionIds) != 3 {
 			fmt.Println("  Encrypted:", "*** MISMATCH")
 		} else {
 			fmt.Println("  Encrypted:", "Success")
 		}
 		objectName = objectName[:len(objectName)-2]
 	}
-
-	//aws s3api copy-object --copy-source vadmeste/testfile --bucket vadmeste --key testfile
-	//  --copy-source-sse-customer-algorithm=AES256
-	//  --copy-source-sse-customer-key=MzJieXRlc2xvbmdzZWNyZXRrZXltdXN0cHJvdmlkZWQ=
-	//  --copy-source-sse-customer-key-md5=7PpPLAK26ONlVUGOWlusfg==
-	//  --sse-customer-algorithm=AES256
-	//  --sse-customer-key=at1TMx82nEy7SoAK8jHYanMQDVZMSLayXaaUvTc6CP0=
-	//  --sse-customer-key-md5="LWkBoT3psNdTYez70TVHUQ=="
-	//{
-	//	"CopyObjectResult": {
-	//	"ETag": "\"03c88e721a47e499dc6bb489daf290c8\"",
-	//		"LastModified": "2018-09-12T10:39:27.000Z"
-	//},
-	//	"SSECustomerKeyMD5": "LWkBoT3psNdTYez70TVHUQ==",
-	//	"SSECustomerAlgorithm": "AES256",
-	//	"CopySourceVersionId": "BEXop4A53jLGIDYRPsVH.xXlMe8w6eVr",
-	//	"VersionId": "DU1kqfvhsC.4aZ11QA9s2i2Gn9wdwrh7"
-	//}
-
-	// Copy onto itself
-	//
 }
 
 func bucketTests(svc *s3.S3, bucketName, objectName, region string) {
