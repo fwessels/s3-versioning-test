@@ -2,12 +2,16 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"strings"
 	"time"
+	"github.com/minio/minio-go"
+	"github.com/minio/minio-go/pkg/encrypt"
 )
 
 func dumpAwsError(err error) {
@@ -845,32 +849,68 @@ func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdent
 	return resultDeleted.Deleted, resultDeleted.Errors
 }
 
-func putObjectEncrypted(svc *s3.S3, bucket, key string) (etag, versionId string) {
-/*
-	result, err := svc.PutObject((&s3.PutObjectInput{}).
-		SetBucket(bucket).
-		SetKey(key).
-		SetSSECustomerAlgorithm("AES256").
-		SetSSECustomerKey("at1TMx82nEy7SoAK8jHYanMQDVZMSLayXaaUvTc6CP0=").
-		SetSSECustomerKeyMD5("LWkBoT3psNdTYez70TVHUQ==").
-		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 1024))),
-	)
+func putObjectEncrypted(s3Client *minio.Client, bucket, key, password string) {
 
-	fmt.Println(result, err)
+	filePath := "versioning.go" // Specify a local file that we will upload
 
-	//  --sse-customer-algorithm=AES256
-	//  --sse-customer-key=at1TMx82nEy7SoAK8jHYanMQDVZMSLayXaaUvTc6CP0=
-	//  --sse-customer-key-md5="LWkBoT3psNdTYez70TVHUQ=="
-
+	// Open a local file that we will upload
+	file, err := os.Open(filePath)
 	if err != nil {
-		dumpAwsError(err)
+		log.Fatalln(err)
+	}
+	defer file.Close()
+
+	// Get file stats.
+	fstat, err := file.Stat()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// New SSE-C where the cryptographic key is derived from a password and the objectname + bucketname as salt
+	encryption := encrypt.DefaultPBKDF([]byte(password), []byte(bucket+key))
+
+	_, err = s3Client.PutObject(bucket, key, file, fstat.Size(), minio.PutObjectOptions{ServerSideEncryption: encryption})
+	if err != nil {
+		log.Fatalln(err)
+	}
+}
+
+func copyObjectInPlaceEncrypted(s3Client *minio.Client, bucket, key, passwordOld, passwordNew string) (etag, versionId string, accessDenied bool) {
+
+	// Source object
+	sseSrc := encrypt.DefaultPBKDF([]byte(passwordOld), []byte(bucket+key))
+	src := minio.NewSourceInfo(bucket, key, sseSrc)
+
+	// Test key rotation for source object in-place.
+	newSSE := encrypt.DefaultPBKDF([]byte(passwordNew), []byte(bucket+key)) // replace key
+	dst, err := minio.NewDestinationInfo(bucket, key, newSSE, nil)
+	if err != nil {
 		return
 	}
 
-	etag = strings.Trim(aws.StringValue(result.ETag), "\"")
-	versionId = aws.StringValue(result.VersionId)
-*/
-	return
+	err = s3Client.CopyObject(dst, src)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				fmt.Println("Error", aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			if err.Error() == "Access denied." {
+				return "", "", true
+			}
+			fmt.Println("Error", err.Error())
+		}
+		return
+	}
+
+	return "", "", false
+}
+
+func copyObjectInPlaceEncryptedWithVersion() {
+	
 }
 
 func main() {
