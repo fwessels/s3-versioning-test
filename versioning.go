@@ -1223,6 +1223,14 @@ func basicTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("  List versions:", "Success")
 	}
 
+	// List objects and check for match to latest etag
+	etags = listObjects(svc, bucketName, objectName)
+	if etagv2 != etags[0] {
+		fmt.Println("     List etags:", "*** MISMATCH")
+	} else {
+		fmt.Println("     List etags:", "Success")
+	}
+
 	deleteObjectWithVersion(svc, bucketName, objectName, versionIdv2)
 	etagv2, versionIdv2 = "", ""
 
