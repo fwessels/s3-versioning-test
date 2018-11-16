@@ -1423,7 +1423,7 @@ func paginatedListingTests(svc *s3.S3, profile, bucketName, objectName, region s
 		vid3, _ := deleteObject(svc, bucketName, objectName)
 
 		// List object versions and check for matching versionids
-		success := listObjectVersionsVerified(svc, false, bucketName, objectName, [][]string{{vid2, vid1}}, [][]string{{vid3}}, []bool{false})
+		success := listObjectVersionsVerified(svc, true, bucketName, objectName, [][]string{{vid2, vid1}}, [][]string{{vid3}}, []bool{false})
 		if !success {
 			fmt.Println(" Paginated list:", "*** MISMATCH")
 		} else {
