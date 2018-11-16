@@ -146,6 +146,31 @@ func putObject(svc *s3.S3, bucket, key string) (etag, versionId string) {
 	return
 }
 
+func putObjectTooManyVersions(svc *s3.S3, bucket, key string) bool {
+
+	_, err := svc.PutObject((&s3.PutObjectInput{}).
+		SetBucket(bucket).
+		SetKey(key).
+		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 1024))),
+	)
+
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "MethodNotAllowed":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+	return false
+}
+
 func getObject(svc *s3.S3, bucket, key, versionId string) (etag string, deleteMarkerReturned bool) {
 
 	input := &s3.GetObjectInput{
@@ -818,6 +843,50 @@ func putObjectMultipart(svc *s3.S3, bucketName string, objectName string) (etag,
 	return multiPartComplete(svc, bucketName, objectName, uploadId, etagPart1)
 }
 
+func multiPartCompleteTooManyVersion(svc *s3.S3, bucket, key, uploadId, etagPart1 string) bool {
+	input := &s3.CompleteMultipartUploadInput{
+		Bucket: 	aws.String(bucket),
+		Key:        aws.String(key),
+		MultipartUpload: &s3.CompletedMultipartUpload{
+			Parts: []*s3.CompletedPart{
+				{
+					ETag:       aws.String(etagPart1),
+					PartNumber: aws.Int64(1),
+				},
+				//{
+				//	ETag:       aws.String("\"d8c2eafd90c266e19ab9dcacc479f8af\""),
+				//	PartNumber: aws.Int64(2),
+				//},
+			},
+		},
+		UploadId:   aws.String(uploadId),
+	}
+
+	_, err := svc.CompleteMultipartUpload(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "MethodNotAllowed":
+				return true
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			fmt.Println(err.Error())
+		}
+	}
+
+	return false
+}
+
+func putObjectMultipartTooManyversion(svc *s3.S3, bucketName string, objectName string) bool {
+	uploadId := multiPartInitiate(svc, bucketName, objectName)
+	etagPart1 := multiPartUpload(svc, bucketName, objectName, uploadId)
+	return multiPartCompleteTooManyVersion(svc, bucketName, objectName, uploadId, etagPart1)
+}
+
 func deleteMultipleObjects(svc *s3.S3, bucket string, objident []*s3.ObjectIdentifier) (objs []*s3.DeletedObject, errs []*s3.Error) {
 
 	if len(objident) == 0 {
@@ -928,6 +997,7 @@ func main() {
 	svc := s3.New(sess)
 
 	basicTests(svc, bucketName, objectName, region)
+	maxNumberOfVersionsTest(svc, bucketName, objectName, region)
 	unversionedTests(svc, bucketName, objectName, region)
 	invalidVersionIdTests(svc, bucketName, objectName, region)
 	paginatedListingTests(svc, profile, bucketName, objectName, region)
@@ -1253,6 +1323,58 @@ func basicTests(svc *s3.S3, bucketName, objectName, region string) {
 		fmt.Println("   List objects:", "*** NOT EXPECTING ANY")
 	} else {
 		fmt.Println("   List objects:", "Success")
+	}
+}
+
+func maxNumberOfVersionsTest(svc *s3.S3, bucketName, objectName, region string) {
+
+	if bucketName == "" {
+		// Create version enabled bucket
+		bucketName = fmt.Sprintf("versioned-%d", time.Now().UnixNano())
+		createBucket(svc, bucketName, region)
+		putBucketVersioning(svc, bucketName, "Enabled")
+	} else {
+		objectName = fmt.Sprintf("object-%d", time.Now().UnixNano())
+	}
+
+	versionId := ""
+	for i := 0; i < 50; i++ {
+		// Put object
+		etagv1, vid := putObject(svc, bucketName, objectName)
+		if versionId == "" {
+			versionId = vid
+		}
+		if et, _ := getObject(svc, bucketName, objectName ,""); et != etagv1 {
+			fmt.Println("  PutTooManyVersions:", "*** WRONG ETAG RETURNED")
+		} else {
+			fmt.Println("  PutTooManyVersions:", "Success")
+		}
+
+		_, deleteMarkerv6 := deleteObject(svc, bucketName, objectName)
+		if !deleteMarkerv6 {
+			fmt.Println("  PutTooManyVersions:", "*** MISSING DELETE MARKER")
+		} else {
+			fmt.Println("  PutTooManyVersions:", "Success")
+		}
+	}
+
+	// Make sure we are getting an error when creating next version
+	if !putObjectTooManyVersions(svc, bucketName, objectName) {
+		fmt.Println("  PutTooManyVersions:", "*** NOT RECEIVED EXPECTED ERROR")
+	}
+
+	if !putObjectMultipartTooManyversion(svc, bucketName, objectName) {
+		fmt.Println("  PutTooManyVersions:", "*** NOT RECEIVED EXPECTED ERROR")
+	}
+
+	// Free up one version
+	deleteObjectWithVersion(svc, bucketName, objectName, versionId)
+
+	etagv1, _ := putObject(svc, bucketName, objectName)
+	if et, _ := getObject(svc, bucketName, objectName ,""); et != etagv1 {
+		fmt.Println("  PutTooManyVersions:", "*** WRONG ETAG RETURNED")
+	} else {
+		fmt.Println("  PutTooManyVersions:", "Success")
 	}
 }
 
