@@ -1346,25 +1346,26 @@ func maxNumberOfVersionsTest(svc *s3.S3, bucketName, objectName, region string) 
 		}
 		if et, _ := getObject(svc, bucketName, objectName ,""); et != etagv1 {
 			fmt.Println("  PutTooManyVersions:", "*** WRONG ETAG RETURNED")
-		} else {
-			fmt.Println("  PutTooManyVersions:", "Success")
 		}
 
 		_, deleteMarkerv6 := deleteObject(svc, bucketName, objectName)
 		if !deleteMarkerv6 {
 			fmt.Println("  PutTooManyVersions:", "*** MISSING DELETE MARKER")
-		} else {
-			fmt.Println("  PutTooManyVersions:", "Success")
 		}
 	}
 
 	// Make sure we are getting an error when creating next version
 	if !putObjectTooManyVersions(svc, bucketName, objectName) {
 		fmt.Println("  PutTooManyVersions:", "*** NOT RECEIVED EXPECTED ERROR")
+	} else {
+		fmt.Println("  PutTooManyVersions:", "Success")
 	}
+
 
 	if !putObjectMultipartTooManyversion(svc, bucketName, objectName) {
 		fmt.Println("  PutTooManyVersions:", "*** NOT RECEIVED EXPECTED ERROR")
+	} else {
+		fmt.Println("  PutTooManyVersions:", "Success")
 	}
 
 	// Free up one version
