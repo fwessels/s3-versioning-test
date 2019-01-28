@@ -133,7 +133,7 @@ func putObject(svc *s3.S3, bucket, key string) (etag, versionId string) {
 	result, err := svc.PutObject((&s3.PutObjectInput{}).
 		SetBucket(bucket).
 		SetKey(key).
-		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 1024))),
+		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 999))),
 	)
 
 	if err != nil {
@@ -151,7 +151,7 @@ func putObjectTooManyVersions(svc *s3.S3, bucket, key string) bool {
 	_, err := svc.PutObject((&s3.PutObjectInput{}).
 		SetBucket(bucket).
 		SetKey(key).
-		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 1024))),
+		SetBody(strings.NewReader(strings.Repeat(fmt.Sprintf("content-%d", time.Now().UnixNano()), 999))),
 	)
 
 	if err != nil {
@@ -1792,7 +1792,6 @@ func deleteMultipleObjectTests(svc *s3.S3, bucketName, objectName, region string
 		vidDelete, _ = deleteObject(svc, bucketName, objectName)
 		objectName = objectName[:len(objectName)-2]
 	}
-
 	objident := []*s3.ObjectIdentifier{}
 
 	objident = append(objident, &s3.ObjectIdentifier{
